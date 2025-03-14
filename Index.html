@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AR Virtual Tutor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .ui-container {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 10;
+        }
+        .button {
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            border-radius: 30px;
+            padding: 12px 24px;
+            margin: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.3s;
+        }
+        .button:active {
+            background-color: rgba(0, 0, 0, 0.8);
+        }
+        .button svg {
+            margin-right: 8px;
+        }
+        .button-mic {
+            background-color: #4285F4;
+        }
+        .button-mic.recording {
+            background-color: #EA4335;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .response-bubble {
+            position: absolute;
+            max-width: 80%;
+            padding: 10px 16px;
+            border-radius: 18px;
+            background-color: rgba(255, 255, 255, 0.9);
+            color: black;
+            font-size: 16px;
+            margin-bottom: 10px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            text-align: left;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            word-wrap: break-word;
+            z-index: 100;
+        }
+        .start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 100;
+            padding: 20px;
+            text-align: center;
+        }
+        .start-screen h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        .start-screen p {
+            font-size: 16px;
+            margin-bottom: 30px;
+            max-width: 600px;
+        }
+        .start-button {
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            padding: 16px 32px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .loading-indicator {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="start-screen">
+        <h1>AR Virtual Tutor</h1>
+        <p>This app will place your virtual tutor in your space using AR. You'll be able to talk to them and get real-time responses.</p>
+        <p>Please grant camera and microphone permissions when prompted.</p>
+        <button class="start-button">Start AR Experience</button>
+    </div>
+
+    <div class="loading-indicator">Loading 3D model...</div>
+
+    <div class="ui-container">
+        <div class="response-bubble"></div>
+        <button class="button button-mic">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+            Speak to Tutor
+        </button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.157.0/three.module.min.js';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/controls/OrbitControls.js';
+
+        // DOM Elements
+        const startScreen = document.querySelector('.start-screen');
+        const startButton = document.querySelector('.start-button');
+        const micButton = document.querySelector('.button-mic');
+        const responseBubble = document.querySelector('.response-bubble');
+        const loadingIndicator = document.querySelector('.loading-indicator');
+
+        // THREE.js setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(0, 10, 5);
+        scene.add(directionalLight);
+
+        // AR Session Variables
+        let avatarModel = null;
+        let avatarMixer = null;
+        let avatarAnimations = {};
+        let arSession = false;
+        let hitTestSource = null;
+        let localSpace = null;
+        let modelPlaced = false;
+        
+        // For non-AR preview
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        camera.position.set(0, 1.6, 3);
+        controls.update();
+
+        // Speech recognition setup
+        let recognition = null;
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+            
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                processUserInput(transcript);
+            };
+            
+            recognition.onerror = function(event) {
+                console.error('Speech recognition error:', event.error);
+                micButton.classList.remove('recording');
+                
+                showResponse("I couldn't hear you. Please try again.");
+            };
+            
+            recognition.onend = function() {
+                micButton.classList.remove('recording');
+            };
+        }
+
+        // Load the 3D model (replace with your avatar model URL)
+        // For testing we'll use a placeholder model
+        function loadAvatarModel() {
+            loadingIndicator.style.display = 'block';
+            
+            const loader = new GLTFLoader();
+            // Replace this URL with your actual Avaturn model URL
+            // For testing, we're using a sample model
+            const modelUrl = 'https://github.com/kiyasia996/CloudEye-eg/blob/main/my_avatar_25_-_fancy_t-shirt_data_center.glb';
+            
+            loader.load(
+                modelUrl,
+                (gltf) => {
+                    avatarModel = gltf.scene;
+                    
+                    // Scale the model appropriately
+                    avatarModel.scale.set(0.5, 0.5, 0.5);
+                    
+                    // Setup animations if available
+                    if (gltf.animations && gltf.animations.length) {
+                        avatarMixer = new THREE.AnimationMixer(avatarModel);
+                        
+                        gltf.animations.forEach((clip) => {
+                            avatarAnimations[clip.name] = avatarMixer.clipAction(clip);
+                        });
+                        
+                        // Play idle animation if available
+                        if (avatarAnimations['Idle'] || avatarAnimations['idle']) {
+                            const idleAnim = avatarAnimations['Idle'] || avatarAnimations['idle'];
+                            idleAnim.play();
+                        } else {
+                            // Play the first animation as fallback
+                            const firstAnim = avatarMixer.clipAction(gltf.animations[0]);
+                            firstAnim.play();
+                        }
+                    }
+                    
+                    // Hide until placed in AR
+                    avatarModel.visible = false;
+                    scene.add(avatarModel);
+                    
+                    loadingIndicator.style.display = 'none';
+                    console.log('Model loaded successfully');
+                },
+                (xhr) => {
+                    console.log('Loading model: ' + (xhr.loaded / xhr.total * 100) + '%');
+                },
+                (error) => {
+                    console.error('Error loading model:', error);
+                    loadingIndicator.style.display = 'none';
+                    showResponse("Failed to load 3D model. Please refresh and try again.");
+                }
+            );
+        }
+
+        // Animation loop
+        const clock = new THREE.Clock();
+        
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+        
+        function render(timestamp, frame) {
+            const delta = clock.getDelta();
+            
+            // Update animations
+            if (avatarMixer) {
+                avatarMixer.update(delta);
+            }
+            
+            // Handle AR hit testing for model placement
+            if (arSession && frame && !modelPlaced) {
+                if (!hitTestSource) {
+                    initializeHitTesting(frame);
+                    return;
+                }
+
+                const hitTestResults = frame.getHitTestResults(hitTestSource);
+                
+                if (hitTestResults.length > 0) {
+                    const hit = hitTestResults[0];
+                    const pose = hit.getPose(localSpace);
+                    
+                    if (pose) {
+                        const position = new THREE.Vector3();
+                        position.setFromMatrixPosition(pose.transform.matrix);
+                        
+                        if (avatarModel) {
+                            avatarModel.position.set(position.x, position.y, position.z);
+                            avatarModel.visible = true;
+                            
+                            // Make avatar face the user
+                            const camPos = new THREE.Vector3();
+                            camera.getWorldPosition(camPos);
+                            camPos.y = avatarModel.position.y; // Keep same height
+                            avatarModel.lookAt(camPos);
+                            
+                            modelPlaced = true;
+                            showResponse("Hello! I'm your virtual tutor. How can I help you today?");
+                        }
+                    }
+                }
+            }
+            
+            // Update controls for non-AR preview
+            if (!arSession) {
+                controls.update();
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        // Initialize AR hit testing
+        function initializeHitTesting(frame) {
+            const session = renderer.xr.getSession();
+            
+            session.requestReferenceSpace('viewer').then((viewerSpace) => {
+                session.requestHitTestSource({ space: viewerSpace }).then((source) => {
+                    hitTestSource = source;
+                });
+            });
+            
+            session.requestReferenceSpace('local').then((space) => {
+                localSpace = space;
+            });
+        }
+
+        // Start AR session
+        function startARSession() {
+            if (!navigator.xr) {
+                showResponse("WebXR not supported by your browser. Try using Safari on iOS 13+ or Chrome on Android.");
+                return;
+            }
+            
+            navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+                if (supported) {
+                    navigator.xr.requestSession('immersive-ar', {
+                        requiredFeatures: ['hit-test'],
+                        optionalFeatures: ['dom-overlay'],
+                        domOverlay: { root: document.body }
+                    }).then(onSessionStarted, onSessionError);
+                } else {
+                    showResponse("AR not supported by your device. You can still view the 3D model in regular mode.");
+                }
+            });
+        }
+
+        function onSessionStarted(session) {
+            arSession = true;
+            startScreen.style.display = 'none';
+            renderer.xr.setSession(session);
+            modelPlaced = false;
+            
+            session.addEventListener('end', () => {
+                arSession = false;
+                modelPlaced = false;
+            });
+        }
+
+        function onSessionError(error) {
+            console.error('AR session error:', error);
+            showResponse("Error starting AR: " + error.message);
+        }
+
+        // Simulate AI responses (replace with actual API calls)
+        function processUserInput(text) {
+            console.log('User said:', text);
+            showResponse("Processing your question: \"" + text + "\"");
+            
+            // Simulate AI processing time
+            setTimeout(() => {
+                // Replace this with actual API call to your GenAI model
+                const responses = {
+                    "hello": "Hi there! I'm your virtual tutor. How can I help you today?",
+                    "who are you": "I'm your virtual tutor, a digital twin designed to assist you with learning.",
+                    "how are you": "I'm functioning well, thank you! Ready to help you learn.",
+                    "what can you do": "I can answer questions, explain concepts, and help you practice various subjects. What would you like to learn about?",
+                    "tell me about yourself": "I'm your virtual tutor created with Avaturn and AR technology. I'm designed to provide personalized assistance with your studies.",
+                    "thank you": "You're welcome! Don't hesitate to ask if you have any more questions.",
+                    "bye": "Goodbye! I'll be here when you need more assistance."
+                };
+                
+                // Simple pattern matching (replace with actual NLP)
+                let response = "I'm not sure how to respond to that yet. As your AI tutor, I'm still learning.";
+                
+                for (const key in responses) {
+                    if (text.toLowerCase().includes(key)) {
+                        response = responses[key];
+                        break;
+                    }
+                }
+                
+                // Play speaking animation if available
+                playTalkingAnimation();
+                
+                showResponse(response);
+            }, 1000);
+        }
+        
+        function playTalkingAnimation() {
+            // Play talking animation if available in your model
+            if (avatarAnimations['Talk'] || avatarAnimations['talk'] || avatarAnimations['Speaking']) {
+                const talkAnim = avatarAnimations['Talk'] || avatarAnimations['talk'] || avatarAnimations['Speaking'];
+                if (talkAnim) {
+                    // Stop other animations
+                    for (const key in avatarAnimations) {
+                        avatarAnimations[key].stop();
+                    }
+                    
+                    talkAnim.play();
+                    
+                    // Return to idle after talking
+                    setTimeout(() => {
+                        talkAnim.stop();
+                        if (avatarAnimations['Idle'] || avatarAnimations['idle']) {
+                            const idleAnim = avatarAnimations['Idle'] || avatarAnimations['idle'];
+                            idleAnim.play();
+                        }
+                    }, 3000);
+                }
+            }
+        }
+
+        // Display response in the UI
+        function showResponse(text) {
+            responseBubble.textContent = text;
+            responseBubble.style.opacity = 1;
+            
+            setTimeout(() => {
+                responseBubble.style.opacity = 0;
+            }, 5000);
+        }
+
+        // Event Listeners
+        startButton.addEventListener('click', () => {
+            loadAvatarModel();
+            startARSession();
+        });
+        
+        micButton.addEventListener('click', () => {
+            if (recognition) {
+                micButton.classList.add('recording');
+                recognition.start();
+            } else {
+                showResponse("Speech recognition is not supported by your browser.");
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start animation loop
+        animate();
+    </script>
+</body>
+</html>
